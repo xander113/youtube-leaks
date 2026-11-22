@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, ErrorText, formValues, useAction, usePage } from '@/Grabs';
+import { api, ErrorText, formValues, useAction, usePage, useResource, Waiting } from '@/Grabs';
 
 export function SignIn({ mode }) {
   const page = usePage();
@@ -47,6 +47,7 @@ export function Plans() {
   const refresh = page.refresh;
   const [query] = useSearchParams();
   const [yearly, setYearly] = useState(false);
+  const navigate = useNavigate();
   const action = useAction();
   const pendingCheckout = query.get('checkout') === 'done' && !auth.tier;
   useEffect(() => {
@@ -59,7 +60,8 @@ export function Plans() {
   function billing(path, body) {
     action.run(async () => {
       const { url } = await api('/billing/' + path, { method: 'POST', body });
-      window.location.assign(url);
+      if (url.startsWith('/payment/')) navigate(url);
+      else window.location.assign(url);
     });
   }
 
@@ -87,6 +89,79 @@ export function Plans() {
           </article>)}
         </div>
       </>}
+    </section>
+  );
+}
+
+
+export function LocalPayment({ manage = false }) {
+  const page = usePage();
+  const auth = usePage().props;
+  const [query] = useSearchParams();
+  const navigate = useNavigate();
+  const action = useAction();
+  const payment = useResource(auth.id ? 'payment:' + auth.id : null,
+    signal => api('/billing/local', { signal }), ['access:changed']);
+  const [selected, setSelected] = useState(null);
+  const [selectedCycle, setSelectedCycle] = useState(null);
+  const plan = selected || (manage ? payment.data?.plan : query.get('plan'));
+  const cycle = selectedCycle || (!manage && query.get('cycle') === 'yearly' ? 'yearly' : 'monthly');
+  const offer = offers.find(entry => entry.id === plan);
+  const amount = offer?.[cycle];
+
+  function submit(operation) {
+    action.run(async () => {
+      const { url } = await api('/billing/local', { method: 'POST', body: { action: operation, plan, cycle } });
+      page.refresh();
+      navigate(url, { replace: true });
+    });
+  }
+
+  if (!auth.id) return <section className="stack narrow"><h1>{manage ? 'Manage plan' : 'Checkout'}</h1>
+    <Link className="button primary" to="/signin">Sign in to continue</Link></section>;
+  if (payment.error) return <section className="stack narrow"><ErrorText error={payment.error} retry={payment.refresh} />
+    <Link to="/plans">Back to plans</Link></section>;
+  if (!payment.data) return <Waiting />;
+  if ((!manage && (!offer || !payment.data.paid)) || (manage && !payment.data.plan)) {
+    return <section className="stack narrow"><h1>Choose a plan</h1><Link to="/plans">Back to plans</Link></section>;
+  }
+
+  return (
+    <section className="payment-page stack">
+      <Link to="/plans" className="back">Back to plans</Link>
+      <h1>{manage ? 'Manage plan' : 'Checkout'}</h1>
+      <div className="payment-grid">
+        <aside className="panel stack payment-summary" aria-label="Order summary">
+          <h2>{offer.name}</h2>
+          <p className="price">{amount} <span>USD / {cycle === 'yearly' ? 'year' : 'month'}</span></p>
+          <ul>{offer.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
+        </aside>
+        <div className="panel stack">
+          {manage ? <>
+            <h2>Your subscription</h2>
+            <p>Current plan <strong className="capitalize">{payment.data.plan}</strong></p>
+            <label>Plan<select value={plan} onChange={event => setSelected(event.target.value)}>
+              {offers.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+            </select></label>
+            <label>Billing period<select value={cycle} onChange={event => setSelectedCycle(event.target.value)}>
+              <option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+            </select></label>
+            <div className="actions">
+              <button className="button primary" disabled={action.pending} onClick={() => submit('change')}>Confirm plan</button>
+              <button className="button quiet" disabled={action.pending} onClick={() => {
+                if (window.confirm('Cancel this subscription?')) submit('cancel');
+              }}>Cancel plan</button>
+            </div>
+          </> : <>
+            <h2>Payment method</h2>
+            <div className="payment-method"><strong>Visa</strong><span>•••• 4242</span></div>
+            <div><span className="muted">Billing email</span><p>{auth.email}</p></div>
+            <button className="button primary" disabled={action.pending} onClick={() => submit('subscribe')}>Pay {amount}</button>
+            <p className="muted">Renews every {cycle === 'yearly' ? 'year' : 'month'}. Cancel from Plans.</p>
+          </>}
+          <ErrorText error={action.error} />
+        </div>
+      </div>
     </section>
   );
 }

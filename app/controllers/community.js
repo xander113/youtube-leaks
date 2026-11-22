@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { details } from '../models/Catalog.js';
+import { tierExpression } from '../models/Account.js';
 import { watcher, signedIn } from '../middleware/access.js';
 import { read, key, kind, text } from '../middleware/validation.js';
 import { fail } from '../middleware/errors.js';
@@ -19,20 +20,25 @@ export function community(db, io) {
     async list(viewer, target) {
       await viewTarget(db, viewer, target);
       const roots = await db.all(`SELECT c.id, c.user_id, c.body, c.created_at, u.name, u.role,
-        CASE WHEN u.paid_until > ? THEN u.plan END AS tier
+        ${tierExpression} AS tier,
+        (SELECT COUNT(*) FROM comment_likes l WHERE l.comment_id = c.id) AS likes,
+        EXISTS (SELECT 1 FROM comment_likes l WHERE l.comment_id = c.id AND l.user_id = ?) AS liked
         FROM comments c JOIN users u ON u.id = c.user_id
         WHERE c.target_type = ? AND c.target_id = ? AND c.parent_id IS NULL AND u.banned_at IS NULL
-        ORDER BY c.created_at DESC, c.id LIMIT 20`, [Date.now(), target.type, target.id]);
+        ORDER BY c.created_at DESC, c.id LIMIT 20`, [Date.now(), viewer.auth.id, target.type, target.id]);
       const replies = roots.length ? await db.all(`SELECT * FROM (
         SELECT c.id, c.user_id, c.body, c.created_at, c.parent_id, u.name, u.role,
-        CASE WHEN u.paid_until > ? THEN u.plan END AS tier,
+        ${tierExpression} AS tier,
+        (SELECT COUNT(*) FROM comment_likes l WHERE l.comment_id = c.id) AS likes,
+        EXISTS (SELECT 1 FROM comment_likes l WHERE l.comment_id = c.id AND l.user_id = ?) AS liked,
         ROW_NUMBER() OVER(PARTITION BY c.parent_id ORDER BY c.created_at DESC, c.id) AS position
         FROM comments c JOIN users u ON u.id = c.user_id WHERE u.banned_at IS NULL
         AND c.parent_id IN (${roots.map(() => '?').join(',')})
-        ) ranked WHERE position <= 5 ORDER BY created_at, id`, [Date.now(), ...roots.map(row => row.id)]) : [];
+        ) ranked WHERE position <= 5 ORDER BY created_at, id`, [Date.now(), viewer.auth.id, ...roots.map(row => row.id)]) : [];
       const present = row => ({
         id: row.id, body: row.body, created_at: row.created_at, name: row.name,
         badge: row.role === 'admin' ? (row.user_id === 1 ? 'Head Admin' : 'Admin') : viewer.paid ? row.tier : null,
+        likes: row.likes, liked: Boolean(row.liked),
         canDelete: viewer.auth.role === 'admin' || viewer.auth.id === row.user_id
       });
       return roots.map(root => ({ ...present(root), replies: replies.filter(row => row.parent_id === root.id).map(present) }));
@@ -57,6 +63,24 @@ export function community(db, io) {
       }
       io.to(commentRoom(target)).emit('comments:changed');
       return { id };
+    },
+    async like(viewer, comment, input) {
+      watcher(viewer);
+      const { liked } = read(z.object({ liked: z.boolean() }), input);
+      const target = await db.one(`SELECT c.target_type AS type, c.target_id AS id FROM comments c
+        JOIN users u ON u.id = c.user_id WHERE c.id = ? AND u.banned_at IS NULL`, [comment]);
+      if (!target) fail(404, 'Comment not found.');
+      await viewTarget(db, viewer, target);
+      if (liked) {
+        const updated = await db.one(`INSERT INTO comment_likes (comment_id, user_id)
+          SELECT c.id, ? FROM comments c WHERE c.id = ? ON CONFLICT DO NOTHING RETURNING comment_id`, [viewer.auth.id, comment]);
+        if (updated) io.to(commentRoom(target)).emit('comments:changed');
+      } else {
+        const removed = await db.one('DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ? RETURNING comment_id',
+          [comment, viewer.auth.id]);
+        if (removed) io.to(commentRoom(target)).emit('comments:changed');
+      }
+      return { liked };
     },
     async remove(viewer, comment) {
       signedIn(viewer);

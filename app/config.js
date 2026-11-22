@@ -32,7 +32,7 @@ const prices = {
   premium: { monthly: env.STRIPE_PREMIUM_MONTHLY, yearly: env.STRIPE_PREMIUM_YEARLY }
 };
 const stripeValues = [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, ...Object.values(prices).flatMap(Object.values)];
-if (stripeValues.some(Boolean) && (!stripeValues.every(Boolean) || new Set(stripeValues.slice(2)).size !== 4)) {
+if (production && stripeValues.some(Boolean) && (!stripeValues.every(Boolean) || new Set(stripeValues.slice(2)).size !== 4)) {
   throw new Error('Stripe needs a secret key, a webhook secret, and four distinct price IDs.');
 }
 

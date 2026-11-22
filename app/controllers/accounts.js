@@ -13,6 +13,7 @@ export function accounts(db, io) {
         VALUES (?, ?, ?, ?) ON CONFLICT (email) DO NOTHING RETURNING id`, [input.email, input.name, hash, Date.now()]);
       if (!row) fail(409, 'This email is already in use.');
       res.set('Set-Cookie', await newSession(db, row.id)).status(201).json({ ok: true });
+      io.to('admins').emit('admin:changed');
     },
     async login(req, res) {
       const input = read(z.object({ email, password: z.string().min(1).max(128) }), req.body);

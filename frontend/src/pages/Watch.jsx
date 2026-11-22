@@ -1,51 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Card } from './Browse';
+import Player from '@/Player';
 import { api, ErrorText, formatDate, formValues, live, socket, useAction, usePage, useResource, viewKey, Waiting } from '@/Grabs';
-
-function Player({ clip }) {
-  const page = usePage();
-  const auth = usePage().props;
-  const premium = page.paid && auth.tier === 'premium';
-  const high = premium || auth.role === 'admin';
-  const [wanted, setWanted] = useState(null);
-  const [failed, setFailed] = useState(false);
-  const [reload, setReload] = useState(0);
-  const video = useRef(null);
-  const resume = useRef({ time: 0, playing: false });
-  const quality = (wanted === 'high' && high) || (wanted === 'hd' && auth.canWatch) || wanted === 'guest'
-    ? wanted : auth.canWatch ? 'hd' : 'guest';
-
-  return (
-    <>
-      <video
-        ref={video} key={quality + ':' + reload} className="player" controls playsInline
-        src={`/api/media/${clip.id}/${quality}`} poster={clip.poster}
-        preload={premium ? 'auto' : 'metadata'}
-        onError={() => setFailed(true)}
-        onLoadedMetadata={event => {
-          const player = event.currentTarget;
-          player.currentTime = Math.min(resume.current.time, player.duration || 0);
-          if (resume.current.playing) player.play().catch(() => {});
-        }}
-      >
-        Your browser cannot play this video.
-      </video>
-      {failed && <p className="error" role="alert">The video could not load. <button className="button small quiet" onClick={() => { setFailed(false); setReload(value => value + 1); }}>Retry</button></p>}
-      {auth.canWatch && <label className="quality">Quality
-        <select value={quality} onChange={event => {
-          resume.current = { time: video.current?.currentTime || 0, playing: !video.current?.paused };
-          setFailed(false);
-          setWanted(event.target.value);
-        }}>
-          <option value="guest">Standard</option>
-          <option value="hd">HD</option>
-          {high && <option value="high">Highest available</option>}
-        </select>
-      </label>}
-    </>
-  );
-}
 
 function SaveToList({ target }) {
   const action = useAction();
@@ -103,27 +60,41 @@ function Thread({ target }) {
     action.run(async () => { await api('/comments/' + id, { method: 'DELETE' }); list.refresh(); });
   }
   function comment(row, root) {
-    return <div className="comment-body">
-      <div className="comment-meta"><strong>{row.name}</strong>{row.badge && <span className="tag">{row.badge}</span>}<span>{formatDate(row.created_at)}</span></div>
-      <p>{row.body}</p>
-      <div className="comment-actions">
-        {root && auth.canWatch && <button type="button" className="text-button" onClick={() => setReply(row)}>Reply</button>}
-        {row.canDelete && <button type="button" className="text-button" disabled={action.pending} onClick={() => remove(row.id)}>Remove</button>}
+    const initials = row.name.trim().split(/\s+/).slice(0, 2).map(word => Array.from(word)[0]).join('').toUpperCase();
+    const shade = (initials.codePointAt(0) || 0) % 4;
+    return <div className="comment-item">
+      <span aria-hidden="true" className={`avatar avatar-${shade}`}>{initials}</span>
+      <div className="comment-content">
+        <div className="comment-body">
+          <div className="comment-meta"><strong>{row.name}</strong>{row.badge && <span className="tag">{row.badge}</span>}</div>
+          <p>{row.body}</p>
+        </div>
+        <div className="comment-actions">
+          <span className="comment-date">{formatDate(row.created_at)}</span>
+          {auth.canWatch ? <button type="button" className="comment-like" aria-label={row.liked ? `Unlike comment. ${row.likes} likes` : `Like comment. ${row.likes} likes`} aria-pressed={row.liked} disabled={action.pending}
+            onClick={() => action.run(async () => {
+              await api(`/comments/${row.id}/like`, { method: 'PATCH', body: { liked: !row.liked } });
+              list.refresh();
+            })}><span aria-hidden="true">{row.liked ? '♥' : '♡'}</span> {row.likes || 'Like'}</button> :
+            row.likes > 0 && <span className="comment-like"><span aria-hidden="true">♡</span> {row.likes}</span>}
+          {root && auth.canWatch && <button type="button" className="text-button" onClick={() => setReply(row)}>Reply</button>}
+          {row.canDelete && <button type="button" className="text-button" disabled={action.pending} onClick={() => remove(row.id)}>Remove</button>}
+        </div>
       </div>
     </div>;
   }
 
   return (
     <section className="stack comments">
-      <h2>Comments</h2>
+      <h2>Comments{list.data?.length > 0 && <span className="thread-count">{list.data.length}</span>}</h2>
       <ErrorText error={list.error || action.error} retry={list.error ? list.refresh : undefined} />
-      {auth.canWatch && !reply && <form onSubmit={post} className="stack panel">
+      {auth.canWatch && !reply && <form onSubmit={post} className="stack panel comment-composer">
         <label>Add a comment<textarea name="body" rows="2" maxLength={500} required /></label>
         <button className="button primary" disabled={action.pending}>Post</button>
       </form>}
       {!auth.id && <p className="muted"><Link to="/signin">Sign in</Link> to comment.</p>}
       {list.pending && !list.data && <Waiting />}
-      {list.data?.length === 0 && <p className="muted">No comments yet.</p>}
+      {list.data?.length === 0 && <p className="muted">Be the first to comment.</p>}
       <ul className="threads">
         {list.data?.map(row => <li key={row.id}>
           {comment(row, true)}
@@ -142,6 +113,7 @@ function Thread({ target }) {
 function WatchItem({ type, id }) {
   const auth = usePage().props;
   const page = usePage();
+  const [query] = useSearchParams();
   const target = { type, id };
   const data = useResource(`watch:${type}:${id}:${viewKey(page)}`,
     signal => live('catalog:details', target, `/details/${type}/${id}`, { signal }), ['catalog:changed']);
@@ -152,18 +124,21 @@ function WatchItem({ type, id }) {
     <article className="watch stack">
       <Link className="back" to="/">Browse</Link>
       {series && clip.poster && <img className="show-art" alt="" src={clip.poster} />}
-      <div className="stack">
+      {!series && !clip.locked && <Player clip={clip} startPlaying={query.get('play') === '1'} />}
+      <div className="stack watch-heading">
         <p className="meta">{series ? clip.random_order ? 'Series · Randomly Assembled (RA)' : 'Series · In date order' : clip.category}</p>
         <h1>{clip.title}</h1>
         <p className="description">{clip.description}</p>
-        {!series && <p className="muted">{formatDate(clip.published_at)}{clip.duration ? ` · ${Math.ceil(clip.duration / 60)} min` : ''}</p>}
+        {!series && <p className="muted">{formatDate(clip.published_at)}{clip.duration ? ` · ${clip.duration < 60 ? clip.duration + ' sec' : Math.ceil(clip.duration / 60) + ' min'}` : ''}</p>}
       </div>
       <ErrorText error={data.error} retry={data.refresh} />
       {clip.locked && <div className="panel stack">
         <p>Watchers can play this {type}.</p>
         <Link className="button primary" to={auth.id ? '/plans' : '/join'}>{auth.id ? 'See plans' : 'Join to watch'}</Link>
       </div>}
-      {!series && !clip.locked && <Player clip={clip} />}
+      {Boolean(clip.demo) && <p className="muted">Sample clip with original preview art.
+        {clip.source_url && <> <a href={clip.source_url} target="_blank" rel="noreferrer">Read or watch the source</a>.</>}
+      </p>}
       {!series && clip.series_id && <Link to={`/series/${clip.series_id}`}>See the series</Link>}
       {series && <section className="stack"><h2>Clips</h2>
         {clip.items.length ? <ul className="cards">{clip.items.map(item => <li key={item.id}><Card item={item} /></li>)}</ul>

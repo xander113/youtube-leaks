@@ -7,20 +7,43 @@ async function sql(file) {
   return readFile(new URL(file, import.meta.url), 'utf8');
 }
 
+const revisions = ['001_initial', '002_access_and_media'];
+
 export async function migrate(db) {
-  if (!config.production) return db.exec(await sql('./development.sql'));
-  const migration = await sql('./migrations/001_initial.sql');
+  if (!config.production) {
+    const [schema, upgrade, sample] = await Promise.all([
+      sql('./development.sql'), sql('./migrations/002_access_and_media.sql'), sql('./development-samples.sql')
+    ]);
+    db.exec(schema);
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const upgraded = db.all('PRAGMA table_info(users)').some(column => column.name === 'paid_override');
+      if (!upgraded) db.exec(upgrade);
+      db.exec(sample);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    return;
+  }
+
+  const migrations = await Promise.all(revisions.map(async name => ({
+    name, statements: await sql(`./migrations/${name}.sql`)
+  })));
   await db.exclusive(async connection => {
     await connection.exec('CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)');
-    if (await connection.one('SELECT name FROM migrations WHERE name = ?', ['001_initial'])) return;
-    await connection.exec('BEGIN');
-    try {
-      await connection.exec(migration);
-      await connection.all('INSERT INTO migrations (name) VALUES (?)', ['001_initial']);
-      await connection.exec('COMMIT');
-    } catch (error) {
-      await connection.exec('ROLLBACK');
-      throw error;
+    for (const migration of migrations) {
+      if (await connection.one('SELECT name FROM migrations WHERE name = ?', [migration.name])) continue;
+      await connection.exec('BEGIN');
+      try {
+        await connection.exec(migration.statements);
+        await connection.all('INSERT INTO migrations (name) VALUES (?)', [migration.name]);
+        await connection.exec('COMMIT');
+      } catch (error) {
+        await connection.exec('ROLLBACK');
+        throw error;
+      }
     }
   });
 }

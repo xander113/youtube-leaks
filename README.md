@@ -1,18 +1,30 @@
 # Youtube Leaks
 
-An Express 5 video site with a React JSX app, Vite, and Socket.IO. It starts in free mode with a local catalog of fictional demo clips. Sample posters are generated images. The silent clips show short moves over those images. Production starts with an empty catalog.
+An Express 5 video site with a React JSX app, Vite, and Socket.IO. It starts in free mode with a local catalog of sample clips about publicly reported creator disputes and court cases. Each sample links to its source. The silent previews use original, generated illustrations. Production starts with an empty catalog.
 
 ## Developer mode on Mac and Windows
 
 Install [Git](https://git-scm.com/install/) and [Node.js 24 LTS](https://nodejs.org/en/download), version 24.14 or newer. For video uploads and RSS imports, install [FFmpeg](https://ffmpeg.org/download.html) and make sure both `ffmpeg` and `ffprobe` are on your PATH.
 
-In Terminal on Mac or PowerShell on Windows, run:
+Clone the repository from Terminal on Mac or PowerShell on Windows:
 
 ```sh
 git clone https://github.com/xander113/youtube-leaks.git
 cd youtube-leaks
+```
+
+On Mac:
+
+```sh
 npm ci
 npm run dev
+```
+
+On Windows PowerShell:
+
+```powershell
+npm.cmd ci
+npm.cmd run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). On the first start, the terminal shows the password for `admin@example.test`. Keep it to sign in as Head Admin. SQLite creates the database and seeds the sample catalog when the app starts.
@@ -21,11 +33,11 @@ On Mac you can also open `setup.command`, and on Windows you can double-click `s
 
 To set the first admin login, configure `HEAD_ADMIN_EMAIL` and `HEAD_ADMIN_PASSWORD` in your terminal before the first start. Choose a password of at least 12 characters. The seed keeps the stored login on later runs. GitHub Actions installs, builds, and runs the access tests on macOS, Windows, and Linux.
 
-Guests can view the free clips. Use **Make an account** on the sign-in screen to try Watcher access, playlists, replies, and help. The sample clips contain no real creator footage. Add media you have permission to publish.
+Guests can view the free clips. Use **Make an account** on the sign-in screen to try Watcher access, playlists, replies, and help. The sample previews use illustrated placeholder footage. Add media you have permission to publish.
 
 ## Admin and RSS
 
-The Admin page handles video uploads, series, guest flags, Watcher bans, feed imports, and help replies. Upload an MP4, MOV, or WebM file up to 250 MB by default and under one hour. The queue makes browser-ready video in the background, creates its poster, and updates the page once it finishes. A failed upload can be retried or removed. Video date controls chronological series. The RA label marks a series set to upload order.
+The Admin page handles video uploads, series, guest flags, Watcher bans, feed imports, and help replies. Upload an MP4, MOV, or WebM file up to 250 MB by default and under one hour. The queue makes browser-ready video in the background, creates its poster, and updates the page once it finishes. A failed upload can be retried or removed. The worker checks its installed encoders and uses H.264/AAC or falls back to VP8/VP9 WebM. It creates JPEG, PNG, or WebP posters based on codec availability. Install a full FFmpeg build if a codec is missing. Set `FFMPEG_PATH` or `FFPROBE_PATH` if the tools are installed outside your PATH. Restart the worker before retrying a clip after changing FFmpeg. Video date controls chronological series. The RA label marks a series set to upload order.
 
 Set `RSS_ALLOWED_HOSTS` to a comma-separated list of exact hostnames for approved feeds and their video files. The importer accepts HTTPS RSS, Media RSS, and Atom entries with direct MP4, MOV, or WebM enclosures. It skips video page links and expects direct downloads without redirects. Feeds check every 15 minutes and import up to four new entries per run. Use **Check now** to queue a check. New files enter the same video queue as uploads. Guest access defaults to off.
 
@@ -38,7 +50,7 @@ The production stack uses Caddy for HTTPS and WebSocket proxying, Express for th
 3. Build and start the stack:
 
    ```sh
-   docker compose -f compose.production.yaml build app
+   docker compose -f compose.production.yaml build app worker
    docker compose -f compose.production.yaml up -d --scale app=2 --wait
    ```
 
@@ -72,6 +84,12 @@ For a deployment with managed databases or a different reverse proxy, use Node.j
 
 ## Turn on paid mode
 
+In developer mode, sign in as Head Admin and enable **Dummy paid**. Watchers see the normal Plans page and can complete testing, change plans, or cancel with the built-in checkout. The test card is fixed and dummy payments never reach Stripe.
+
+In either mode, an administrator can set a Watcher to **Paid · Basic**, **Paid · Premium**, or **Unpaid** in the admin panel. Choose **Use subscription** to restore the tier from billing. Overrides affect app access. They leave any Stripe subscription and charges as they are.
+
+### Stripe in production
+
 Create four recurring USD prices in Stripe. Configure the Stripe customer portal for plan changes and cancellation. Set each price ID on the server.
 
 | Plan | Per month | Per year | Price variables |
@@ -94,7 +112,7 @@ Use Stripe test mode for a checkout and billing portal check before accepting pa
 
 - `npm run db:migrate` applies the schema. `npm run db:seed` initializes the required admin and mode settings.
 - `npm run db:refresh` recreates the local database and seeds it. Stop the app first. This erases local accounts and the catalog. Back up the database and media directory together when needed.
-- SQLite uses the checked-in `database/development.sql` file for local schema and demo rows. Production uses `database/migrations` and `database/production-seed.sql`.
+- SQLite applies the checked-in schema and sample SQL on startup. Production uses `database/migrations` and `database/production-seed.sql`. Run `npm run db:migrate` before starting an updated production app.
 - The web routes are in `routes/web.js`, HTTP API in `routes/api.js`, and Socket.IO in `routes/socket.js`. Models, controllers, and services are in `app/`.
 - The React entry renders `@/Root`, which exports the starter layout. To replace the starter layout and navigation, retain the `usePage().props` contract and the router outlet.
 - `npm test` runs the local access test. `npm run build` makes the production frontend.

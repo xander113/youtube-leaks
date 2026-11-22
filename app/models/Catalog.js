@@ -1,6 +1,6 @@
 import { fail } from '../middleware/errors.js';
 
-const clipFields = 'c.id, c.title, c.description, c.category, c.guest, c.series_id, c.published_at, c.duration';
+const clipFields = 'c.id, c.title, c.description, c.category, c.guest, c.series_id, c.published_at, c.duration, c.source_url, c.demo';
 const seriesFields = 's.id, s.title, s.description, s.category, s.random_order, s.created_at';
 
 function clipCard(row, viewer) {

@@ -65,6 +65,8 @@ export function apiRoutes({ db, io, redis, admin, billing, community, playlists,
 
   api.get('/comments/:type/:id', send(req => community.list(req.viewer, target(req))));
   api.post('/comments/:type/:id', commentLimit, send(req => community.post(req.viewer, { ...req.body, ...target(req) }), 201));
+  api.patch('/comments/:id/like', rate(redis, 'likes', 60, 60, req => req.viewer.auth.id || req.ip),
+    send(req => community.like(req.viewer, item(req), req.body)));
   api.delete('/comments/:id', send(req => community.remove(req.viewer, item(req))));
   api.get('/playlists', send(req => playlists.list(req.viewer, req.query.items !== '0')));
   api.post('/playlists', send(req => playlists.create(req.viewer, req.body), 201));
@@ -77,6 +79,11 @@ export function apiRoutes({ db, io, redis, admin, billing, community, playlists,
   api.post('/support', rate(redis, 'support', 8, 60, req => req.viewer.auth.id || req.ip), send(req => support.send(req.viewer, req.body), 201));
   api.post('/billing/checkout', rate(redis, 'billing', 12, 60), send(req => billing.checkout(req.viewer, req.body, redis)));
   api.post('/billing/portal', rate(redis, 'billing', 12, 60), send(req => billing.portal(req.viewer)));
+
+  if (!config.production) {
+    api.get('/billing/local', send(req => billing.localPlan(req.viewer)));
+    api.post('/billing/local', rate(redis, 'billing', 12, 60), send(req => billing.localPayment(req.viewer, req.body)));
+  }
 
   api.use('/admin', requireAdmin);
   api.get('/admin', send(req => admin.state(req.query)));
@@ -98,6 +105,7 @@ export function apiRoutes({ db, io, redis, admin, billing, community, playlists,
   api.patch('/admin/clips/:id', send(req => admin.editClip(item(req), req.body)));
   api.post('/admin/clips/:id/retry', send(req => admin.retry(item(req))));
   api.delete('/admin/clips/:id', send(req => admin.discard(item(req))));
+  api.patch('/admin/watchers/:id/payment', send(req => admin.payment(read(id, req.params.id), req.body)));
   api.post('/admin/watchers/:id/ban', send(req => admin.ban(read(id, req.params.id), req.body)));
   api.post('/admin/feeds', send(req => admin.addFeed(req.body), 201));
   api.patch('/admin/feeds/:id', send(req => admin.changeFeed(item(req), req.body)));

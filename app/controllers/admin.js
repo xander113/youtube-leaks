@@ -7,6 +7,7 @@ import { fail } from '../middleware/errors.js';
 import { flag, id as userId, key, read, settingsSchema, text } from '../middleware/validation.js';
 import { sourcePath } from '../services/media.js';
 import { safeUrl } from '../services/rss.js';
+import { tierExpression } from '../models/Account.js';
 
 const clipSchema = z.object({
   title: text(120), description: text(1600), category: text(60), guest: flag,
@@ -26,8 +27,8 @@ export function admins(db, io, billingConfigured, catalogChanged) {
     async state(query = {}) {
       const before = query.before ? read(userId, query.before) : 2147483647;
       const [users, clips, series, feeds] = await Promise.all([
-        db.all(`SELECT id, name, email, role, plan, banned_at FROM users WHERE id > 1 AND id < ?
-          ORDER BY id DESC LIMIT 51`, [before]),
+        db.all(`SELECT u.id, u.name, u.email, u.role, u.paid_override, u.banned_at, ${tierExpression} AS plan
+          FROM users u WHERE u.id > 1 AND u.id < ? ORDER BY u.id DESC LIMIT 51`, [Date.now(), before]),
         db.all(`SELECT id, title, description, category, series_id, guest, status, published_at,
           job_error, demo FROM clips ORDER BY created_at DESC, id LIMIT 100`),
         db.all('SELECT id, title, random_order FROM series ORDER BY created_at DESC, id LIMIT 300'),
@@ -91,6 +92,16 @@ export function admins(db, io, billingConfigured, catalogChanged) {
       await db.all('UPDATE settings SET paid = ? WHERE id = 1', [Number(paid)]);
       io.emit('access:changed');
       return { paid };
+    },
+    async payment(id, input) {
+      const { access } = read(z.object({ access: z.enum(['automatic', 'unpaid', 'basic', 'premium']) }), input);
+      const row = await db.one("UPDATE users SET paid_override = ? WHERE id = ? AND role = 'watcher' RETURNING id",
+        [access === 'automatic' ? null : access, id]);
+      if (!row) fail(404, 'Watcher not found.');
+      io.to(`account:${id}`).emit('access:changed');
+      io.emit('comments:changed');
+      adminChanged();
+      return { ok: true };
     },
     async ban(id, input) {
       const { banned } = read(z.object({ banned: z.boolean() }), input);

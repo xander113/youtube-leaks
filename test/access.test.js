@@ -37,8 +37,8 @@ test('guest, Watcher, and admin access agrees on HTTP and Socket.IO', { timeout:
     await rm(dataDir, { recursive: true, force: true });
   });
   const get = (path, headers = {}) => fetch(base + '/api' + path, { headers });
-  const post = (path, body, cookie) => fetch(base + '/api' + path, {
-    method: 'POST',
+  const post = (path, body, cookie, method = 'POST') => fetch(base + '/api' + path, {
+    method,
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'YoutubeLeaks', ...(cookie && { cookie }) },
     body: JSON.stringify(body)
   });
@@ -87,6 +87,39 @@ test('guest, Watcher, and admin access agrees on HTTP and Socket.IO', { timeout:
   const adminCookie = adminLogin.headers.get('set-cookie').split(';')[0];
   assert.equal((await (await get('/viewer', { cookie: adminCookie })).json()).auth.isHead, true);
   assert.equal((await post('/admin/watchers/1/ban', { banned: true }, adminCookie)).status, 404);
+
+  assert.equal((await post('/admin/mode', { paid: true }, adminCookie)).status, 200);
+  const view = async () => (await (await get('/viewer', { cookie: watcherCookie })).json()).auth;
+  assert.equal((await view()).canWatch, false);
+  assert.equal((await get('/billing/local', { cookie: watcherCookie })).status, 200);
+  const checkout = await post('/billing/checkout', { plan: 'basic', cycle: 'monthly' }, watcherCookie);
+  assert.equal((await checkout.json()).url, '/payment/checkout?plan=basic&cycle=monthly');
+  const confirmation = await post('/billing/local', { action: 'subscribe', plan: 'basic', cycle: 'monthly' }, watcherCookie);
+  assert.equal(confirmation.status, 200, await confirmation.text());
+  assert.equal((await view()).tier, 'basic');
+  const comment = thread.data[0].id;
+  const likes = '/comments/' + comment + '/like';
+  assert.equal((await post(likes, { liked: true }, watcherCookie, 'PATCH')).status, 200);
+  assert.equal((await post(likes, { liked: true }, watcherCookie, 'PATCH')).status, 200);
+  const liked = await socket.timeout(2000).emitWithAck('comments:list', target);
+  assert.equal(liked.data[0].likes, 1);
+  assert.equal(liked.data[0].liked, true);
+  assert.equal(liked.data[0].badge, 'basic');
+  assert.equal((await post(likes, { liked: false }, watcherCookie, 'PATCH')).status, 200);
+
+  const access = '/admin/watchers/' + watcher.id + '/payment';
+  assert.equal((await post(access, { access: 'premium' }, watcherCookie, 'PATCH')).status, 403);
+  assert.equal((await post(access, { access: 'unpaid' }, adminCookie, 'PATCH')).status, 200);
+  assert.equal((await view()).canWatch, false);
+  assert.equal((await post('/billing/checkout', { plan: 'basic', cycle: 'monthly' }, watcherCookie)).status, 403);
+  assert.equal((await post(access, { access: 'premium' }, adminCookie, 'PATCH')).status, 200);
+  assert.equal((await view()).tier, 'premium');
+  assert.equal((await get('/media/late-edit/high', { cookie: watcherCookie, Range: 'bytes=0-31' })).status, 206);
+  assert.equal((await post(access, { access: 'automatic' }, adminCookie, 'PATCH')).status, 200);
+  assert.equal((await view()).tier, 'basic');
+  assert.equal((await post('/billing/local', { action: 'cancel' }, watcherCookie)).status, 200);
+  assert.equal((await view()).tier, null);
+
   const kicked = once(socket, 'disconnect');
   assert.equal((await post('/admin/watchers/' + watcher.id + '/ban', { banned: true }, adminCookie)).status, 200);
   await kicked;

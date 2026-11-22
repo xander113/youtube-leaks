@@ -1,26 +1,22 @@
-FROM node:24-bookworm-slim AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY frontend ./frontend
-COPY vite.config.js ./
-RUN npm run build && npm prune --omit=dev
-
-FROM node:24-bookworm-slim
-WORKDIR /app
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
+COPY . .
+RUN npm run build \
+    && npm prune --omit=dev \
     && install -d -m 0700 -o node -g node /app/storage
+
+FROM node:24-alpine AS runtime
+WORKDIR /app
 ENV NODE_ENV=production
 ENV DATA_DIR=/app/storage
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/frontend/dist ./frontend/dist
-COPY package.json server.js ./
-COPY app ./app
-COPY database ./database
-COPY routes ./routes
-COPY scripts ./scripts
+COPY --chown=node:node --from=build /app ./
 EXPOSE 3000
 USER node
 CMD ["node", "scripts/start.js"]
+
+FROM runtime AS worker
+USER root
+RUN apk add --no-cache ca-certificates ffmpeg
+USER node

@@ -7,14 +7,20 @@ import { fail, HttpError } from '../middleware/errors.js';
 import { read } from '../middleware/validation.js';
 
 export const planPrices = { basic: { monthly: 299, yearly: 3588 }, premium: { monthly: 499, yearly: 5988 } };
+const planInput = z.object({ plan: z.enum(['basic', 'premium']), cycle: z.enum(['monthly', 'yearly']) });
+const localInput = z.discriminatedUnion('action', [
+  planInput.extend({ action: z.enum(['subscribe', 'change']) }),
+  z.object({ action: z.literal('cancel') })
+]);
 const subscriptionEvents = new Set(['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted',
   'customer.subscription.paused', 'customer.subscription.resumed', 'invoice.paid', 'invoice.payment_failed', 'checkout.session.completed']);
 
 export function billing(db, io) {
-  const stripe = config.stripeKey && new Stripe(config.stripeKey, { timeout: 8000, maxNetworkRetries: 1 });
+  const stripe = config.production && config.stripeKey && new Stripe(config.stripeKey, { timeout: 8000, maxNetworkRetries: 1 });
   let priceCheck;
 
   async function verifyPrices() {
+    if (!config.production) return;
     if (!stripe) fail(503, 'Billing is not set up.');
     priceCheck ??= Promise.all(Object.entries(config.prices).flatMap(([plan, cycles]) =>
       Object.entries(cycles).map(async ([cycle, id]) => {
@@ -47,7 +53,11 @@ export function billing(db, io) {
       const updated = await db.one(`UPDATE users SET plan = ?, paid_until = ?
         WHERE id = ? AND billing_revision = ? RETURNING id`,
       [active?.plan ?? null, active?.until ?? null, revision.id, revision.billing_revision]);
-      if (updated) io.to(`account:${revision.id}`).emit('access:changed');
+      if (updated) {
+        io.to(`account:${revision.id}`).emit('access:changed');
+        io.to('admins').emit('admin:changed');
+        io.emit('comments:changed');
+      }
     } catch (error) {
       throw new HttpError(503, 'Could not sync this Stripe subscription.', error);
     }
@@ -65,12 +75,50 @@ export function billing(db, io) {
     return saved?.stripe_customer_id || (await db.one('SELECT stripe_customer_id FROM users WHERE id = ?', [id])).stripe_customer_id;
   }
 
+  function localWatcher(viewer) {
+    if (config.production) fail(404, 'Page not found.');
+    signedIn(viewer);
+    if (viewer.auth.role !== 'watcher') fail(403, 'Plans are for Watchers.');
+  }
+
   return {
-    configured: Boolean(stripe), verifyPrices,
+    configured: !config.production || Boolean(stripe), verifyPrices,
+    async localPlan(viewer) {
+      localWatcher(viewer);
+      const row = await db.one('SELECT plan FROM users WHERE id = ?', [viewer.auth.id]);
+      return { plan: row.plan, paid: viewer.paid };
+    },
+    async localPayment(viewer, body) {
+      localWatcher(viewer);
+      const input = read(localInput, body);
+      const cancel = input.action === 'cancel';
+      const subscribe = input.action === 'subscribe';
+      const now = Date.now();
+      const until = cancel ? null : now + (input.cycle === 'yearly' ? 365 : 30) * 86400000;
+
+      const actionCondition = subscribe
+        ? "AND u.paid_override IS NULL AND (u.plan IS NULL OR COALESCE(u.paid_until, 0) <= ?) AND EXISTS (SELECT 1 FROM settings WHERE id = 1 AND paid = 1)"
+        : "AND u.plan IS NOT NULL";
+      const active = await db.one(`UPDATE users AS u SET plan = ?, paid_until = ?
+        WHERE u.id = ? AND u.role = 'watcher' AND u.banned_at IS NULL ${actionCondition} RETURNING id`,
+      [cancel ? null : input.plan, until, viewer.auth.id, ...(subscribe ? [now] : [])]);
+      if (!active && !cancel) {
+        fail(409, 'This plan change is unavailable. Go back to Plans and try again.');
+      }
+      io.to(`account:${viewer.auth.id}`).emit('access:changed');
+      io.emit('comments:changed');
+      io.to('admins').emit('admin:changed');
+      return { url: subscribe ? '/plans?checkout=done' : '/plans' };
+    },
     async checkout(viewer, body, redis) {
       signedIn(viewer);
       if (!viewer.paid || viewer.auth.role !== 'watcher') fail(403, 'Paid plans are for Watchers in paid mode.');
-      const { plan, cycle } = read(z.object({ plan: z.enum(['basic', 'premium']), cycle: z.enum(['monthly', 'yearly']) }), body);
+      const { plan, cycle } = read(planInput, body);
+      if (viewer.auth.paidOverride === 'unpaid') fail(403, 'Contact support to change your access.');
+      if (!config.production) {
+        if (viewer.auth.tier) fail(409, 'Use Manage plan to change your subscription.');
+        return { url: `/payment/checkout?plan=${plan}&cycle=${cycle}` };
+      }
       await verifyPrices();
 
       const lock = `ytl:checkout:${viewer.auth.id}`;
@@ -101,7 +149,9 @@ export function billing(db, io) {
     },
     async portal(viewer) {
       signedIn(viewer);
-      if (!stripe || !viewer.auth.hasBilling) fail(404, 'No billing account was found.');
+      if (!viewer.auth.hasBilling) fail(404, 'No billing account was found.');
+      if (!config.production) return { url: '/payment/manage' };
+      if (!stripe) fail(404, 'No billing account was found.');
       const user = await db.one('SELECT stripe_customer_id FROM users WHERE id = ?', [viewer.auth.id]);
       const session = await stripe.billingPortal.sessions.create({ customer: user.stripe_customer_id, return_url: `${config.appOrigin}/plans` });
       return { url: session.url };

@@ -4,9 +4,11 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import Layout from '@/Root';
 import { Browse, Search } from '@/pages/Browse';
 import { Watch } from '@/pages/Watch';
-import { SignIn, Plans } from '@/pages/Account';
+import { SignIn, Plans, LocalPayment } from '@/pages/Account';
 import { Library, Support } from '@/pages/Library';
 import { Admin } from '@/pages/Admin';
+import '@fontsource-variable/dm-sans';
+import '@fontsource/barlow-condensed/latin-700.css';
 import './styles.css';
 
 createRoot(document.getElementById('root')).render(
@@ -20,6 +22,8 @@ createRoot(document.getElementById('root')).render(
           <Route path="signin" element={<SignIn mode="login" />} />
           <Route path="join" element={<SignIn mode="register" />} />
           <Route path="plans" element={<Plans />} />
+          <Route path="payment/checkout" element={<LocalPayment />} />
+          <Route path="payment/manage" element={<LocalPayment manage />} />
           <Route path="library" element={<Library />} />
           <Route path="support" element={<Support />} />
           <Route path="admin" element={<Admin />} />

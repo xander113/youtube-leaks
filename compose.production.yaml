@@ -3,6 +3,8 @@ x-service: &app-image
   pull_policy: never
   restart: unless-stopped
   init: true
+  read_only: true
+  tmpfs: [/tmp]
   networks: [backend]
   environment: &app-env
     APP_ORIGIN: ${APP_ORIGIN:?Set the HTTPS application origin}
@@ -69,7 +71,7 @@ services:
       <<: *app-env
       HEAD_ADMIN_EMAIL: ${HEAD_ADMIN_EMAIL:-}
       HEAD_ADMIN_PASSWORD: ${HEAD_ADMIN_PASSWORD:-}
-    command: ["sh", "-c", "npm run db:migrate && npm run db:seed"]
+    command: ["sh", "-c", "node database/cli.js migrate && node database/cli.js seed"]
     healthcheck:
       disable: true
     depends_on:
@@ -78,7 +80,9 @@ services:
 
   app:
     <<: *app-image
-    build: .
+    build:
+      context: .
+      target: runtime
     environment:
       <<: *app-env
       RUN_JOBS: "0"
@@ -91,6 +95,10 @@ services:
 
   worker:
     <<: *app-image
+    image: youtube-leaks-worker:local
+    build:
+      context: .
+      target: worker
     depends_on: *dependencies
 
   caddy:

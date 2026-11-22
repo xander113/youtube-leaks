@@ -31,7 +31,7 @@ export function Admin() {
   const [tab, setTab] = useState('clips');
   const [cursor, setCursor] = useState(null);
   const [message, setMessage] = useState('');
-  const data = useResource(auth.role === 'admin' && tab !== 'support' ? 'admin:' + (cursor || 'first') : null,
+  const data = useResource(auth.role === 'admin' && tab !== 'support' ? 'admin:' + tab + ':' + (cursor || 'first') : null,
     signal => live('admin:get', cursor ? { before: cursor } : {}, '/admin' + (cursor ? '?before=' + cursor : ''), { signal }), ['admin:changed']);
   const action = useAction();
 
@@ -65,16 +65,18 @@ export function Admin() {
   }
 
   const info = data.data;
+  const paidModeName = auth.mockBilling ? 'Dummy paid' : 'Paid';
   return (
     <section className="stack">
       <h1>Admin</h1>
       {auth.isHead && <div className="panel split">
-        <div><strong>Site mode</strong><p className="muted">{page.paid ? 'Paid' : 'Free'}</p></div>
+        <div><strong>Site mode</strong><p className="muted">{page.paid ? paidModeName : 'Free'}</p></div>
         <button className="button quiet" disabled={action.pending || (!page.paid && !page.billingAvailable)} onClick={() => {
-          if (window.confirm(page.paid ? 'Let every Watcher view clips for free? Current Stripe plans will keep billing until they are canceled.' : 'Require a plan for Watcher clips?')) {
+          if (window.confirm(page.paid ? (auth.mockBilling ? 'Let every Watcher view clips for free?' : 'Let every Watcher view clips for free? Existing Stripe plans keep billing until canceled.') : auth.mockBilling ? 'Enable dummy payments for developer testing?' : 'Require a plan for Watcher clips?')) {
             change('/mode', 'POST', { paid: !page.paid }, 'Site mode saved.');
           }
-        }}>{page.paid ? 'Switch to free' : 'Switch to paid'}</button>
+        }}>{page.paid ? 'Switch to free' : auth.mockBilling ? 'Switch to dummy paid' : 'Switch to paid'}</button>
+        {auth.mockBilling && <p className="muted">Dummy paid mode uses a test card and makes no charges.</p>}
         {!page.billingAvailable && <p className="muted">Set up Stripe to use paid mode.</p>}
       </div>}
       <nav className="actions admin-tabs" aria-label="Admin sections">
@@ -151,12 +153,25 @@ export function Admin() {
         <h2>Watchers</h2>
         {info.users.length === 0 && <p className="muted">No more accounts.</p>}
         <ul className="lines panel">{info.users.map(user => <li className="split" key={user.id}>
-          <div className="preserve"><strong>{user.name}</strong> <span className="tag">{user.role === 'admin' ? 'Admin' : user.banned_at ? 'Banned' : user.plan || 'Watcher'}</span>
+          <div className="preserve"><strong>{user.name}</strong> <span className="tag">{user.role === 'admin' ? 'Admin' : user.banned_at ? 'Banned' : user.plan || (user.paid_override === 'unpaid' ? 'Unpaid' : 'Watcher')}</span>
             <p className="muted">{user.email}</p>
           </div>
-          {user.role === 'watcher' && <button className="button quiet small" disabled={action.pending} onClick={() => {
+          {user.role === 'watcher' && <div className="watcher-controls">
+            <form className="inline" key={user.id + ':' + user.paid_override} onSubmit={event => {
+              const access = formValues(event).get('access');
+              change('/watchers/' + user.id + '/payment', 'PATCH', { access }, 'Payment access saved.');
+            }}>
+              <label>Payment access<select name="access" defaultValue={user.paid_override || 'automatic'}>
+                <option value="automatic">Use subscription</option>
+                <option value="unpaid">Unpaid</option>
+                <option value="basic">Paid · Basic</option>
+                <option value="premium">Paid · Premium</option>
+              </select></label>
+              <button className="button quiet small" disabled={action.pending}>Save access</button>
+            </form>
+            <button className="button quiet small" disabled={action.pending} onClick={() => {
             if (user.banned_at || window.confirm('Ban this Watcher?')) change('/watchers/' + user.id + '/ban', 'POST', { banned: !user.banned_at }, user.banned_at ? 'Watcher unbanned.' : 'Watcher banned.');
-          }}>{user.banned_at ? 'Unban' : 'Ban'}</button>}
+          }}>{user.banned_at ? 'Unban' : 'Ban'}</button></div>}
         </li>)}</ul>
         <div className="actions">
           {cursor && <button className="button quiet" onClick={() => setCursor(null)}>Newest accounts</button>}
