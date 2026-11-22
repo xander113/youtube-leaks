@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { api, ErrorText, live, PageContext, socket, useResource, Waiting } from '@/Grabs';
 import Navigation from '@/Navigation';
+import PreviewProvider from '@/Preview';
+import { useRouteScroll } from '@/RouteScroll';
 
 export default function Layout() {
   const { pathname } = useLocation();
@@ -12,9 +14,7 @@ export default function Layout() {
     return () => { socket.disconnect(); };
   }, []);
 
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname]);
+  const main = useRouteScroll(Boolean(viewer.data));
 
   const refresh = viewer.refresh;
   const resetSession = useCallback(() => {
@@ -47,13 +47,15 @@ export default function Layout() {
 
   return (
     <PageContext.Provider value={page}>
-      <a className="skip" href="#content">Skip to content</a>
-      <Navigation />
-      <main id="content" className="wrap">
-        <ErrorText error={viewer.error} retry={viewer.refresh} />
-        <Outlet />
-      </main>
-      <footer className="wrap footer">Youtube Leaks</footer>
+      <PreviewProvider>
+        <a className="skip" href="#content">Skip to content</a>
+        <Navigation />
+        <main id="content" className={pathname === '/' ? 'browse-main' : 'wrap'} ref={main}>
+          <ErrorText error={viewer.error} retry={viewer.refresh} />
+          <div key={pathname} className="route-scene"><Outlet /></div>
+        </main>
+        <footer className="wrap footer">Youtube Leaks</footer>
+      </PreviewProvider>
     </PageContext.Provider>
   );
 }

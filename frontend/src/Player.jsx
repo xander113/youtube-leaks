@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { usePage } from '@/Grabs';
+import { Link, useLocation } from 'react-router-dom';
+import { playbackPath, usePage } from '@/Grabs';
+import { progressKey, readProgress, saveProgress } from '@/WatchProgress';
 
 function clock(value) {
   const seconds = Math.floor(value || 0);
@@ -12,11 +14,15 @@ function Control({ label, symbol, ...props }) {
   return <button type="button" aria-label={label} title={label} className="player-button" {...props}>{symbol}</button>;
 }
 
-export default function Player({ clip, startPlaying }) {
+export default function Player({ clip, startPlaying, restart, next }) {
   const page = usePage();
   const auth = usePage().props;
   const premium = page.paid && auth.tier === 'premium';
   const high = premium || auth.role === 'admin';
+  const location = useLocation();
+  const storageKey = progressKey(auth.id);
+  const [saved] = useState(() => readProgress(storageKey).find(entry => entry.id === clip.id));
+  const [ended, setEnded] = useState(false);
   const [wanted, setWanted] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [controls, setControls] = useState(true);
@@ -30,11 +36,34 @@ export default function Player({ clip, startPlaying }) {
   const player = useRef(null);
   const frame = useRef(null);
   const timer = useRef(null);
-  const resume = useRef({ time: 0, play: startPlaying });
+  const resume = useRef({ time: restart ? 0 : saved?.time || 0, play: startPlaying });
+  const watch = useRef({ time: 0, duration: 0, tracking: false, lastWrite: 0 });
   const quality = (wanted === 'high' && high) || (wanted === 'hd' && auth.canWatch) || wanted === 'guest'
     ? wanted : auth.canWatch ? 'hd' : 'guest';
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    const checkpoint = watch.current;
+    function flush() {
+      if (checkpoint.tracking) saveProgress(storageKey, clip.id, checkpoint.time, checkpoint.duration);
+    }
+    window.addEventListener('pagehide', flush);
+    return () => {
+      clearTimeout(timer.current);
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [storageKey, clip.id]);
+
+  function checkpoint(element, force = false) {
+    const progress = watch.current;
+    progress.time = element.currentTime;
+    progress.duration = element.duration;
+    const intervalElapsed = Math.abs(progress.time - progress.lastWrite) >= 2;
+    if (progress.tracking && (force || intervalElapsed)) {
+      saveProgress(storageKey, clip.id, progress.time, progress.duration);
+      progress.lastWrite = progress.time;
+    }
+  }
 
   function wake() {
     clearTimeout(timer.current);
@@ -47,6 +76,8 @@ export default function Player({ clip, startPlaying }) {
     if (!element || !Number.isFinite(element.duration)) return;
     element.currentTime = Math.min(Math.max(value, 0), element.duration);
     setPosition(element.currentTime);
+    setEnded(false);
+    if (watch.current.tracking) checkpoint(element, true);
     wake();
   }
 
@@ -56,7 +87,10 @@ export default function Player({ clip, startPlaying }) {
 
   function playPause() {
     if (!player.current) return;
-    if (player.current.paused) player.current.play().catch(() => setControls(true));
+    if (player.current.paused) {
+      setEnded(false);
+      player.current.play().catch(() => setControls(true));
+    }
     else player.current.pause();
     wake();
   }
@@ -95,16 +129,26 @@ export default function Player({ clip, startPlaying }) {
         src={`/api/media/${clip.id}/${quality}`} poster={clip.poster} preload={premium ? 'auto' : 'metadata'}
         onError={() => { setFailed(true); setBuffering(false); }}
         onWaiting={() => setBuffering(true)}
-        onPlaying={() => { setBuffering(false); setPlaying(true); wake(); }}
-        onPause={() => { setPlaying(false); setControls(true); }}
-        onEnded={() => { setPlaying(false); setControls(true); }}
-        onTimeUpdate={event => setPosition(event.currentTarget.currentTime)}
+        onPlaying={() => {
+          watch.current.tracking = true;
+          setEnded(false);
+          setBuffering(false);
+          setPlaying(true);
+          wake();
+        }}
+        onPause={event => { checkpoint(event.currentTarget, true); setPlaying(false); setControls(true); }}
+        onEnded={event => { checkpoint(event.currentTarget, true); setEnded(true); setPlaying(false); setControls(true); }}
+        onTimeUpdate={event => {
+          setPosition(event.currentTarget.currentTime);
+          checkpoint(event.currentTarget);
+        }}
         onVolumeChange={event => { setVolume(event.currentTarget.volume); setMuted(event.currentTarget.muted); }}
         onLoadedMetadata={event => {
           const element = event.currentTarget;
           if (Number.isFinite(element.duration)) {
             setDuration(element.duration);
-            element.currentTime = Math.min(resume.current.time, element.duration);
+            const at = resume.current.time;
+            if (at && at < element.duration) element.currentTime = at;
           }
           element.volume = volume;
           element.muted = muted;
@@ -116,8 +160,17 @@ export default function Player({ clip, startPlaying }) {
         if (playing && !controls && event.nativeEvent.pointerType === 'touch') wake();
         else playPause();
       }} aria-label={playing ? 'Pause video' : 'Play video'}>
-        {!playing && !failed && <span aria-hidden="true" className="player-big-play"><span className="play-mark" /></span>}
+        {!playing && !failed && !ended && <span aria-hidden="true" className="player-big-play"><span className="play-mark" /></span>}
       </button>
+      {ended && !failed && <div className="player-end">
+        {next && <div><span className="meta">Up next</span><strong>{next.title}</strong></div>}
+        <div className="actions">
+          {next && <Link className="button primary small" to={playbackPath(next)} state={location.state} replace>
+            <span className="play-mark" aria-hidden="true" />Next clip
+          </Link>}
+          <button className="button quiet small" type="button" onClick={() => { seek(0); playPause(); }}>Replay</button>
+        </div>
+      </div>}
       {buffering && playing && <span className="player-wait" role="status">Loading video…</span>}
       {failed && <div className="player-error">
         <p role="alert">The video could not load.</p>

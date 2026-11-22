@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Card } from './Browse';
 import Player from '@/Player';
 import { api, ErrorText, formatDate, formValues, live, socket, useAction, usePage, useResource, viewKey, Waiting } from '@/Grabs';
@@ -114,17 +114,27 @@ function WatchItem({ type, id }) {
   const auth = usePage().props;
   const page = usePage();
   const [query] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const target = { type, id };
   const data = useResource(`watch:${type}:${id}:${viewKey(page)}`,
     signal => live('catalog:details', target, `/details/${type}/${id}`, { signal }), ['catalog:changed']);
   const clip = data.data;
+  const show = useResource(clip?.series_id && !clip.locked ? `next:${clip.series_id}:${viewKey(page)}` : null,
+    signal => live('catalog:details', { type: 'series', id: clip.series_id }, `/details/series/${clip.series_id}`, { signal }),
+    ['catalog:changed']);
+  const episodes = show.data?.items || [];
+  const index = episodes.findIndex(item => item.id === id);
+  const next = index < 0 ? null : episodes.slice(index + 1).find(item => !item.locked);
   if (!clip) return data.error ? <ErrorText error={data.error} retry={data.refresh} /> : <Waiting />;
   const series = type === 'series';
   return (
     <article className="watch stack">
-      <Link className="back" to="/">Browse</Link>
+      {location.state?.fromCatalog
+        ? <button className="catalog-back" type="button" onClick={() => navigate(-1)}>‹ Back to catalog</button>
+        : <Link className="back catalog-back" to="/">‹ Browse</Link>}
       {series && clip.poster && <img className="show-art" alt="" src={clip.poster} />}
-      {!series && !clip.locked && <Player clip={clip} startPlaying={query.get('play') === '1'} />}
+      {!series && !clip.locked && <Player clip={clip} startPlaying={query.get('play') === '1'} restart={query.get('start') === '1'} next={next} />}
       <div className="stack watch-heading">
         <p className="meta">{series ? clip.random_order ? 'Series · Randomly Assembled (RA)' : 'Series · In date order' : clip.category}</p>
         <h1>{clip.title}</h1>

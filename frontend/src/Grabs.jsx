@@ -112,6 +112,14 @@ export function itemPath(item) {
   return `/${item.kind}/${item.id}`;
 }
 
+export function playbackPath(item, restart = false) {
+  return itemPath(item) + (restart ? '?play=1&start=1' : '?play=1');
+}
+
+export function isCatalogPath(pathname) {
+  return pathname === '/' || pathname === '/search' || pathname.startsWith('/series/');
+}
+
 export function viewKey(page) {
   const watcher = page.props;
   return `${watcher.id || 'guest'}:${watcher.canWatch}:${watcher.tier}:${page.paid}`;
