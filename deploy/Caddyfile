@@ -1,0 +1,12 @@
+{$APP_ORIGIN} {
+	reverse_proxy app:3000 {
+		dynamic a app 3000 {
+			refresh 5s
+			versions ipv4
+		}
+		lb_policy least_conn
+		lb_try_duration 3s
+		lb_try_interval 250ms
+		stream_close_delay 5m
+	}
+}

@@ -1,0 +1,123 @@
+x-service: &app-image
+  image: youtube-leaks:local
+  pull_policy: never
+  restart: unless-stopped
+  init: true
+  networks: [backend]
+  environment: &app-env
+    APP_ORIGIN: ${APP_ORIGIN:?Set the HTTPS application origin}
+    DATABASE_URL: postgres://youtube_leaks:${POSTGRES_PASSWORD:?Set a strong PostgreSQL password}@postgres:5432/youtube_leaks
+    REDIS_URL: redis://:${REDIS_PASSWORD:?Set a strong Redis password}@redis:6379
+    TRUST_PROXY: ${TRUST_PROXY:-uniquelocal}
+    PG_POOL_MAX: ${PG_POOL_MAX:-15}
+    MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-250}
+    RSS_ALLOWED_HOSTS: ${RSS_ALLOWED_HOSTS:-}
+    CORS_ORIGINS: ${CORS_ORIGINS:-}
+    CROSS_SITE_COOKIES: ${CROSS_SITE_COOKIES:-0}
+    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    STRIPE_BASIC_MONTHLY: ${STRIPE_BASIC_MONTHLY:-}
+    STRIPE_BASIC_YEARLY: ${STRIPE_BASIC_YEARLY:-}
+    STRIPE_PREMIUM_MONTHLY: ${STRIPE_PREMIUM_MONTHLY:-}
+    STRIPE_PREMIUM_YEARLY: ${STRIPE_PREMIUM_YEARLY:-}
+  volumes:
+    - media:/app/storage
+  stop_grace_period: 20s
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+    interval: 15s
+    timeout: 4s
+    retries: 5
+    start_period: 15s
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: youtube_leaks
+      POSTGRES_USER: youtube_leaks
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong PostgreSQL password}
+    networks: [backend]
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 4s
+      timeout: 4s
+      retries: 15
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a strong Redis password}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set a strong Redis password}"]
+    networks: [backend]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 4s
+      timeout: 4s
+      retries: 15
+
+  migrate:
+    <<: *app-image
+    restart: "no"
+    environment:
+      <<: *app-env
+      HEAD_ADMIN_EMAIL: ${HEAD_ADMIN_EMAIL:-}
+      HEAD_ADMIN_PASSWORD: ${HEAD_ADMIN_PASSWORD:-}
+    command: ["sh", "-c", "npm run db:migrate && npm run db:seed"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    <<: *app-image
+    build: .
+    environment:
+      <<: *app-env
+      RUN_JOBS: "0"
+    networks: [edge, backend]
+    depends_on: &dependencies
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *app-image
+    depends_on: *dependencies
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:?Set the HTTPS application origin}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    networks: [edge]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+networks:
+  edge:
+  backend:
+
+volumes:
+  postgres:
+  redis:
+  media:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+frontend/dist
+storage
+database/demo
+test
+.env
+.env.*
+*.log
