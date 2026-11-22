@@ -99,13 +99,14 @@ export function Admin() {
         {info.clips.map(clip => <details key={clip.id} className="panel admin-detail">
           <summary><strong>{clip.title}</strong><span className="tag">{clip.status}</span>{Boolean(clip.guest) && <span className="tag">For guests</span>}</summary>
           <div className="stack">
+            {clip.status === 'ready' && !clip.secure_stream && !clip.job_error && <p className="muted">Preparing this clip for protected playback…</p>}
             {clip.status === 'ready' && <Link to={'/clip/' + clip.id}>Open clip</Link>}
             {clip.job_error && <p className="error preserve">{clip.job_error}</p>}
-            {clip.status === 'failed' && <div className="actions">
+            {(clip.status === 'failed' || (clip.status === 'ready' && clip.job_error && !clip.secure_stream)) && <div className="actions">
               <button className="button quiet small" disabled={action.pending} onClick={() => change('/clips/' + clip.id + '/retry', 'POST', undefined, 'Clip sent back to the queue.')}>Retry video</button>
-              <button className="button quiet small" disabled={action.pending} onClick={() => {
+              {clip.status === 'failed' && <button className="button quiet small" disabled={action.pending} onClick={() => {
                 if (window.confirm('Remove this failed upload?')) change('/clips/' + clip.id, 'DELETE', undefined, 'Failed clip removed.');
-              }}>Remove failed clip</button>
+              }}>Remove failed clip</button>}
             </div>}
             <form key={JSON.stringify(clip)} className="form-grid" onSubmit={event => submitForm(event, '/clips/' + clip.id, 'edit')}>
               <ClipFields clip={clip} series={info.series} />

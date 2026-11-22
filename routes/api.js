@@ -17,7 +17,7 @@ import { staging } from '../app/services/media.js';
 export function apiRoutes({ db, io, redis, admin, billing, community, playlists, support, isDraining }) {
   const api = express.Router();
   const account = accounts(db, io);
-  const video = media(db);
+  const video = media(db, redis);
   const upload = multer({
     storage: multer.diskStorage({ destination: staging, filename: (_req, _file, cb) => cb(null, randomUUID() + '.source') }),
     limits: { fileSize: config.maxUpload, files: 1, fields: 6, fieldSize: 4096, parts: 8 }
@@ -61,7 +61,8 @@ export function apiRoutes({ db, io, redis, admin, billing, community, playlists,
     const { type, id } = target(req);
     return catalog.details(db, req.viewer, type, id);
   }));
-  api.get('/media/:id/:quality', video.play);
+  api.post('/playback/:id/:quality', rate(redis, 'playback-start', 120, 60), video.start);
+  api.get('/playback/:token/:asset', video.stream);
 
   api.get('/comments/:type/:id', send(req => community.list(req.viewer, target(req))));
   api.post('/comments/:type/:id', commentLimit, send(req => community.post(req.viewer, { ...req.body, ...target(req) }), 201));

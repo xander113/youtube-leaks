@@ -18,7 +18,7 @@
 
 * { box-sizing: border-box; }
 html { scrollbar-gutter: stable; }
-html:has(.preview[open]) { overflow: hidden; }
+html:has(.preview[open]), html:has(.cinema[data-expanded=true]) { overflow: hidden; }
 body { margin: 0; }
 button, input, textarea, select { font: inherit; }
 img, video { display: block; max-width: 100%; }
@@ -85,7 +85,8 @@ main.wrap, .browse-main { min-height: 65vh; padding-block: 1.35rem 3rem; }
 .browse-main { padding-block-start: 0; }
 .browse-feed { position: relative; }
 .browse-feed > h1 { padding-top: 1.35rem; }
-.route-scene { animation: scene-in var(--motion-scene) var(--ease-out) both; }
+.route-scene { animation: scene-in var(--motion-scene) var(--ease-out); }
+.route-scene:has(.cinema[data-expanded=true]) { animation: none; }
 .footer { border-top: 1px solid var(--line); color: var(--muted); padding-block: 1rem 1.5rem; }
 
 .button {
@@ -300,7 +301,14 @@ button.comment-like { cursor: pointer; }
   overflow: hidden; border-radius: .75rem; border: 1px solid #2b3a50; color: #fff;
 }
 .cinema video { width: 100%; height: 100%; object-fit: contain; }
-.cinema:fullscreen { border: 0; border-radius: 0; width: 100%; height: 100%; }
+.cinema:fullscreen, .cinema[data-expanded=true] { border: 0; border-radius: 0; width: 100%; height: 100%; }
+.cinema[data-expanded=true] { position: fixed; z-index: 100; inset: 0; height: 100dvh; }
+.cinema[data-fullscreen=true] .player-tools {
+  padding-block: 3rem max(1rem, env(safe-area-inset-bottom));
+  padding-inline: clamp(1rem, 4vw, 3.5rem);
+}
+.cinema[data-fullscreen=true][data-controls=false]:not(:has(:focus-visible)),
+.cinema[data-fullscreen=true][data-controls=false]:not(:has(:focus-visible)) .player-surface { cursor: none; }
 .player-surface { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1; border: 0; color: #fff; background: transparent; cursor: pointer; }
 .player-big-play {
   display: grid; place-items: center; width: clamp(3.1rem, 8vw, 5.1rem); aspect-ratio: 1; border-radius: 50%;
@@ -324,6 +332,31 @@ button.comment-like { cursor: pointer; }
 .player-extra select { width: 3.15rem; background-color: #142035; margin-left: .25rem; padding: .2rem .45rem; font-size: .78rem; }
 .player-time { margin-left: .3rem; white-space: nowrap; font-size: .78rem; color: #d5dced; font-variant-numeric: tabular-nums; }
 .player-seek, .player-audio input { min-height: 1.1rem; height: 1.1rem; margin: 0; padding: 0; accent-color: var(--blue); cursor: pointer; }
+.player-timeline { position: relative; display: grid; align-items: center; min-height: 1.6rem; }
+.player-timeline progress {
+  position: absolute; inset-inline: 0; appearance: none; width: 100%; height: .23rem;
+  border: 0; background: #ffffff45; color: #5fb6ff; pointer-events: none;
+  transition: height var(--motion-fast) var(--ease-out);
+}
+.player-timeline:hover progress, .player-timeline:focus-within progress { height: .36rem; }
+.player-timeline progress::-webkit-progress-bar { background: #ffffff45; }
+.player-timeline progress::-webkit-progress-value { background: #5fb6ff; }
+.player-timeline progress::-moz-progress-bar { background: #5fb6ff; }
+.player-seek { position: relative; appearance: none; width: 100%; border: 0; background: transparent; }
+.player-seek::-webkit-slider-thumb { appearance: none; width: .8rem; height: .8rem; border-radius: 50%; background: #e8f6ff; }
+.player-seek::-moz-range-thumb { width: .8rem; height: .8rem; border: 0; border-radius: 50%; background: #e8f6ff; }
+.fullscreen-mark {
+  width: 1.05rem; height: 1.05rem; display: block;
+  background:
+    linear-gradient(currentColor, currentColor) left top / 36% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 36% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / 36% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 36% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) left top / 2px 36% no-repeat,
+    linear-gradient(currentColor, currentColor) right top / 2px 36% no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / 2px 36% no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / 2px 36% no-repeat;
+}
 .player-audio { display: flex; align-items: center; }
 .player-audio input { display: none; }
 .speaker { position: relative; display: block; width: 1.1rem; height: .9rem; }
@@ -333,10 +366,25 @@ button.comment-like { cursor: pointer; }
 }
 .speaker::after { position: absolute; inset: 0 0 0 60%; content: ''; border-right: 2px solid currentColor; border-radius: 50%; }
 .speaker-muted::after { border-radius: 0; border-right: 0; border-top: 2px solid currentColor; transform: translateY(45%) rotate(-45deg); }
-.player-title { display: none; }
-.cinema:fullscreen .player-title { display: block; position: absolute; z-index: 2; top: 1.25rem; left: 1.25rem; font-weight: 750; }
-.player-error, .player-wait { position: absolute; z-index: 3; top: 45%; left: 50%; transform: translate(-50%, -50%); background: #152640; padding: .6rem .9rem; border-radius: .55rem; white-space: nowrap; }
-.player-error { display: grid; gap: .4rem; justify-items: center; }
+.player-title {
+  position: absolute; z-index: 2; top: 0; inset-inline: 0;
+  display: flex; align-items: center; gap: .8rem; padding: clamp(.75rem, 2.5vw, 1.5rem);
+  background: linear-gradient(#050912dc, transparent);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
+}
+.cinema[data-controls=false]:not(:has(:focus-visible)) .player-title { opacity: 0; transform: translateY(-.6rem); pointer-events: none; }
+.player-error, .player-wait {
+  position: absolute; z-index: 3; top: 45%; left: 50%; translate: -50% -50%;
+  background: #152640ee; padding: .6rem .9rem; border-radius: .55rem;
+  animation: scene-in 220ms var(--ease-out) both;
+}
+.player-wait { display: flex; align-items: center; gap: .65rem; white-space: nowrap; pointer-events: none; }
+.player-spinner {
+  width: 1rem; height: 1rem; border-radius: 50%; border: 2px solid #7dbbf878; border-top-color: #d8efff;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.player-error { display: grid; gap: .4rem; justify-items: center; width: min(92%, 25rem); text-align: center; }
 .player-end {
   position: absolute; z-index: 2; inset: 0 0 auto;
   display: grid; align-content: center; justify-items: center; gap: .45rem;

@@ -7,18 +7,20 @@ async function sql(file) {
   return readFile(new URL(file, import.meta.url), 'utf8');
 }
 
-const revisions = ['001_initial', '002_access_and_media'];
+const revisions = ['001_initial', '002_access_and_media', '003_protected_playback'];
 
 export async function migrate(db) {
   if (!config.production) {
-    const [schema, upgrade, sample] = await Promise.all([
-      sql('./development.sql'), sql('./migrations/002_access_and_media.sql'), sql('./development-samples.sql')
+    const [schema, upgrade, playback, sample] = await Promise.all([
+      sql('./development.sql'), sql('./migrations/002_access_and_media.sql'),
+      sql('./migrations/003_protected_playback.sql'), sql('./development-samples.sql')
     ]);
     db.exec(schema);
     db.exec('BEGIN IMMEDIATE');
     try {
       const upgraded = db.all('PRAGMA table_info(users)').some(column => column.name === 'paid_override');
       if (!upgraded) db.exec(upgrade);
+      if (!db.all('PRAGMA table_info(clips)').some(column => column.name === 'stream_id')) db.exec(playback);
       db.exec(sample);
       db.exec('COMMIT');
     } catch (error) {

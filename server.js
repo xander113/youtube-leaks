@@ -47,7 +47,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'"],
       fontSrc: ["'self'"], imgSrc: ["'self'", 'data:'],
-      mediaSrc: ["'self'"], connectSrc: ["'self'", config.appOrigin.replace(/^https:/, 'wss:')],
+      mediaSrc: ["'self'", "blob:"], workerSrc: ["'self'", "blob:"], connectSrc: ["'self'", config.appOrigin.replace(/^https:/, 'wss:')],
       frameAncestors: ["'none'"], objectSrc: ["'none'"], formAction: ["'self'"]
     }
   } : false,

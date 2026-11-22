@@ -16,24 +16,13 @@ export function availableEncoders() {
   return capabilities;
 }
 
-export function videoProfile(encoders, hasAudio) {
-  if (encoders.has('libx264') && (!hasAudio || encoders.has('aac'))) {
-    return { format: 'mp4', video: 'libx264', audio: 'aac',
-      options: (crf) => ['-preset', 'veryfast', '-crf', String(crf), '-movflags', '+faststart'] };
+export function streamingProfile(encoders, hasAudio) {
+  if (hasAudio && !encoders.has('aac')) return null;
+  if (encoders.has('libx264')) {
+    return { video: 'libx264', options: crf => ['-preset', 'veryfast', '-crf', String(crf)] };
   }
-  if (encoders.has('libopenh264') && (!hasAudio || encoders.has('aac'))) {
-    return { format: 'mp4', video: 'libopenh264', audio: 'aac',
-      options: (_crf, bitrate) => ['-b:v', bitrate, '-movflags', '+faststart'] };
-  }
-  const audio = encoders.has('libopus') ? 'libopus' : encoders.has('libvorbis') ? 'libvorbis' : null;
-  if (hasAudio && !audio) return null;
-  if (encoders.has('libvpx-vp9')) {
-    return { format: 'webm', video: 'libvpx-vp9', audio,
-      options: crf => ['-b:v', '0', '-crf', String(crf + 7), '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1'] };
-  }
-  if (encoders.has('libvpx')) {
-    return { format: 'webm', video: 'libvpx', audio,
-      options: (crf, bitrate) => ['-b:v', bitrate, '-crf', String(crf + 7), '-deadline', 'good', '-cpu-used', '4'] };
+  if (encoders.has('libopenh264')) {
+    return { video: 'libopenh264', options: (_crf, bitrate) => ['-b:v', bitrate] };
   }
   return null;
 }

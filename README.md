@@ -4,7 +4,7 @@ An Express 5 video site with a React JSX app, Vite, and Socket.IO. It starts in 
 
 ## Developer mode on Mac and Windows
 
-Install [Git](https://git-scm.com/install/) and [Node.js 24 LTS](https://nodejs.org/en/download), version 24.14 or newer. For video uploads and RSS imports, install [FFmpeg](https://ffmpeg.org/download.html) and make sure both `ffmpeg` and `ffprobe` are on your PATH.
+Install [Git](https://git-scm.com/install/) and [Node.js 24 LTS](https://nodejs.org/en/download), version 24.14 or newer. For video playback, uploads, and RSS imports, install [FFmpeg](https://ffmpeg.org/download.html) and make sure both `ffmpeg` and `ffprobe` are on your PATH.
 
 Clone the repository from Terminal on Mac or PowerShell on Windows:
 
@@ -37,7 +37,7 @@ Guests can view the free clips. Use **Make an account** on the sign-in screen to
 
 ## Admin and RSS
 
-The Admin page handles video uploads, series, guest flags, Watcher bans, feed imports, and help replies. Upload an MP4, MOV, or WebM file up to 250 MB by default and under one hour. The queue makes browser-ready video in the background, creates its poster, and updates the page once it finishes. A failed upload can be retried or removed. The worker checks its installed encoders and uses H.264/AAC or falls back to VP8/VP9 WebM. It creates JPEG, PNG, or WebP posters based on codec availability. Install a full FFmpeg build if a codec is missing. Set `FFMPEG_PATH` or `FFPROBE_PATH` if the tools are installed outside your PATH. Restart the worker before retrying a clip after changing FFmpeg. Video date controls chronological series. The RA label marks a series set to upload order.
+The Admin page handles video uploads, series, guest flags, Watcher bans, feed imports, and help replies. Upload an MP4, MOV, or WebM file up to 250 MB by default and under one hour. The queue makes browser-ready video in the background, creates its poster, and updates the page once it finishes. A failed upload can be retried or removed. The worker accepts MP4, MOV, and WebM inputs and uses H.264/AAC to prepare encrypted streams. It creates JPEG, PNG, or WebP posters based on codec availability. Install a full FFmpeg build if a codec is missing. Set `FFMPEG_PATH` or `FFPROBE_PATH` if the tools are installed outside your PATH. Restart the worker before retrying a clip after changing FFmpeg. Video date controls chronological series. The RA label marks a series set to upload order.
 
 Set `RSS_ALLOWED_HOSTS` to a comma-separated list of exact hostnames for approved feeds and their video files. The importer accepts HTTPS RSS, Media RSS, and Atom entries with direct MP4, MOV, or WebM enclosures. It skips video page links and expects direct downloads without redirects. Feeds check every 15 minutes and import up to four new entries per run. Use **Check now** to queue a check. New files enter the same video queue as uploads. Guest access defaults to off.
 
@@ -64,7 +64,7 @@ The production stack uses Caddy for HTTPS and WebSocket proxying, Express for th
 
 ### Run on your own services
 
-For a deployment with managed databases or a different reverse proxy, use Node.js 24 LTS and install FFmpeg. Run `npm ci` and `npm run build`. Set `NODE_ENV=production`, `DATABASE_URL`, `REDIS_URL`, `APP_ORIGIN`, and the initial admin credentials. Run `npm run db:migrate` and `npm run db:seed` once. Run `npm start` under a service manager. Route HTTP, ranges, and WebSocket upgrades to the same app port. Mount the same private media storage on all app and worker nodes.
+For a deployment with managed databases or a different reverse proxy, use Node.js 24 LTS and install FFmpeg. Run `npm ci` and `npm run build`. Set `NODE_ENV=production`, `DATABASE_URL`, `REDIS_URL`, `APP_ORIGIN`, and the initial admin credentials. Run `npm run db:migrate` and `npm run db:seed` once. Run `npm start` under a service manager. Route HTTP and WebSocket upgrades to the same app port. Mount the same private media storage on all app and worker nodes.
 
 | Optional variable | Use |
 | --- | --- |
@@ -79,8 +79,14 @@ For a deployment with managed databases or a different reverse proxy, use Node.j
 ### Scale and monitor
 
 - Increase `--scale app=2` to add web replicas. Increase `--scale worker=1` independently if video encoding falls behind. For several hosts, use a load balancer, shared private media storage, PostgreSQL, and Redis. Count each process’s connection pool toward the database connection budget.
-- Monitor `/api/health/live` and `/api/health/ready`, response latency, WebSocket reconnects, queue delay, database pool saturation, and media bandwidth. Private playback supports single byte ranges and sends a no-store cache policy.
+- Monitor `/api/health/live` and `/api/health/ready`, response latency, WebSocket reconnects, queue delay, database pool saturation, and media bandwidth. Playback responses use a no-store cache policy. Keep the shared media volume private.
 - Place production behind your provider’s DDoS protection and preserve client IP forwarding from trusted proxies. Size storage and network throughput by the bitrate and expected number of video streams. The local load tests check concurrent API and live connections. Run a separate load test with your production videos and infrastructure.
+
+## Protected playback
+
+Clips are served as encrypted HLS segments. The player requests a short-lived grant that is tied to the current login or a guest browser cookie. The server checks current access again before serving a playlist, key, or segment. Direct video-file routes and player download controls are closed to every role. HLS protection does not prevent screen recording or guarantee that a viewer cannot save data their browser can decode.
+
+Run the production migrations and replace all web replicas before opening an upgraded deployment to traffic. The worker repackages existing clips in the background, so playback can take a little time to become available. Keep the worker and web replicas on the same private media volume. Existing source files are retained for recovery. In development, the worker generates sample previews from the included poster art.
 
 ## Turn on paid mode
 

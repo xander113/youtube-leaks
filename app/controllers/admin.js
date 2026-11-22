@@ -30,13 +30,16 @@ export function admins(db, io, billingConfigured, catalogChanged) {
         db.all(`SELECT u.id, u.name, u.email, u.role, u.paid_override, u.banned_at, ${tierExpression} AS plan
           FROM users u WHERE u.id > 1 AND u.id < ? ORDER BY u.id DESC LIMIT 51`, [Date.now(), before]),
         db.all(`SELECT id, title, description, category, series_id, guest, status, published_at,
-          job_error, demo FROM clips ORDER BY created_at DESC, id LIMIT 100`),
+          job_error, demo, stream_id FROM clips ORDER BY created_at DESC, id LIMIT 100`),
         db.all('SELECT id, title, random_order FROM series ORDER BY created_at DESC, id LIMIT 300'),
         db.all('SELECT id, url, category, series_id, guest, enabled, last_run, last_error, started_at FROM feeds ORDER BY url LIMIT 100')
       ]);
       return {
         users: users.slice(0, 50), nextUser: users.length > 50 ? users[49].id : null,
-        clips: clips.map(row => ({ ...row, job_error: config.production && row.job_error ? 'Video processing failed. Check the server log.' : row.job_error })),
+        clips: clips.map(({ stream_id, ...row }) => ({
+          ...row, secure_stream: Boolean(stream_id),
+          job_error: config.production && row.job_error ? 'Video processing failed. Check the server log.' : row.job_error
+        })),
         series, feeds
       };
     },
@@ -73,7 +76,10 @@ export function admins(db, io, billingConfigured, catalogChanged) {
       return row;
     },
     async retry(id) {
-      const row = await db.one("UPDATE clips SET status = 'queued', job_error = NULL WHERE id = ? AND status = 'failed' RETURNING id", [id]);
+      const row = await db.one(`UPDATE clips SET status = CASE WHEN status = 'failed' THEN 'queued' ELSE status END,
+        job_error = NULL, stream_started_at = NULL
+        WHERE id = ? AND (status = 'failed' OR (status = 'ready' AND stream_id IS NULL AND job_error IS NOT NULL))
+        RETURNING id`, [id]);
       if (!row) fail(409, 'Only failed videos can be retried.');
       adminChanged();
       return row;
